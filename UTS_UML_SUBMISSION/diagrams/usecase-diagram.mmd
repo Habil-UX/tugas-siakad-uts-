@@ -1,0 +1,88 @@
+flowchart LR
+    %% ==========================================================
+    %% AKTOR SISTEM INFORMASI AKADEMIK (SIAKAD MINGGU 3-12)
+    %% ==========================================================
+    CalonMhs(["Calon Mahasiswa"])
+    Mhs(["Mahasiswa Aktif"])
+    Dosen(["Dosen / Dosen PA"])
+    Admin(["Admin Akademik & Keuangan"])
+    SysPMB(["Sistem PMB & Payment Gateway"])
+
+    subgraph SIAKAD["Sistem Informasi Akademik Terintegrasi (SIAKAD - SEVIMA Mini)"]
+        direction TB
+
+        %% Modul 1: PMB (Minggu 3-4)
+        UC_Reg("UC-01: Daftar Kuliah / Registrasi PMB")
+        UC_ValPhone("UC-02: Validasi Format Telepon & Cek Email Unik")
+        UC_CekPMB("UC-03: Cek Status Pendaftaran PMB")
+        UC_AppPMB("UC-04: Approve / Reject Pendaftaran PMB")
+        UC_GenNIM("UC-05: Generate NIM Otomatis Thread-Safe")
+        UC_StatPMB("UC-06: Lihat Statistik PMB (GROUP BY)")
+
+        %% Modul 2: KRS (Minggu 5-6)
+        UC_IsiKRS("UC-07: Isi & Submit KRS")
+        UC_ValKRS("UC-08: Validasi Chain of Responsibility\n(SKS <= 24, Prasyarat >= C, Konflik, Duplikat)")
+        UC_CekSPP("UC-09: Verifikasi Bebas Tunggakan SPP Overdue")
+        UC_RecKRS("UC-10: Rekomendasi KRS Optimal (AI CSP)")
+        UC_AppKRS("UC-11: Approve / Revise KRS Mahasiswa")
+
+        %% Modul 3: Jadwal & Ruangan (Minggu 7-8)
+        UC_Jadwal("UC-12: Kelola Jadwal Kuliah & Ruangan")
+        UC_DetKonflik("UC-13: Deteksi Konflik 3D & Kapasitas Ruangan")
+        UC_Notify("UC-14: Kirim Notifikasi Perubahan Jadwal (Observer)")
+        UC_Resched("UC-15: Rekomendasi 3 Alternatif Jadwal (AI CSP)")
+
+        %% Modul 4: Nilai & Transkrip (Minggu 9-10)
+        UC_InputNilai("UC-16: Input & Edit Nilai Mahasiswa")
+        UC_ValPresensi75("UC-17: Validasi Kehadiran Minimal >= 75%")
+        UC_AuditNilai("UC-18: Catat Audit Trail Perubahan Nilai (DB Trigger)")
+        UC_Transkrip("UC-19: Lihat IPK & Generate PDF Transkrip Resmi")
+        UC_HitungGPA("UC-20: Hitung IPS, IPK & Predikat Kelulusan")
+
+        %% Modul 5: Keuangan SPP (Minggu 11)
+        UC_GenBill("UC-21: Generate Tagihan SPP Semester (APScheduler)")
+        UC_BayarSPP("UC-22: Proses Pembayaran SPP & Webhook HMAC")
+
+        %% Modul 6: Presensi QR Code (Minggu 12)
+        UC_GenQR("UC-23: Generate QR Code Presensi (JWT HS256 15m)")
+        UC_ScanQR("UC-24: Scan QR Presensi & Validasi Window Waktu")
+        UC_RepPresensi("UC-25: Export Laporan Presensi Excel & AI Insights")
+    end
+
+    %% Relasi Aktor ke Use Case
+    CalonMhs --> UC_Reg
+    CalonMhs --> UC_CekPMB
+
+    Admin --> UC_AppPMB
+    Admin --> UC_StatPMB
+    Admin --> UC_Jadwal
+    Admin --> UC_GenBill
+
+    Mhs --> UC_IsiKRS
+    Mhs --> UC_Transkrip
+    Mhs --> UC_BayarSPP
+    Mhs --> UC_ScanQR
+
+    Dosen --> UC_AppKRS
+    Dosen --> UC_InputNilai
+    Dosen --> UC_GenQR
+    Dosen --> UC_RepPresensi
+
+    SysPMB --> UC_GenNIM
+    SysPMB --> UC_BayarSPP
+
+    %% Relasi <<include>> dan <<extend>>
+    UC_Reg -. "<<include>>" .-> UC_ValPhone
+    UC_AppPMB -. "<<include>>" .-> UC_GenNIM
+
+    UC_IsiKRS -. "<<include>>" .-> UC_ValKRS
+    UC_IsiKRS -. "<<include>>" .-> UC_CekSPP
+    UC_RecKRS -. "<<extend>>" .-> UC_IsiKRS
+
+    UC_Jadwal -. "<<include>>" .-> UC_DetKonflik
+    UC_Jadwal -. "<<include>>" .-> UC_Notify
+    UC_Resched -. "<<extend>>" .-> UC_DetKonflik
+
+    UC_InputNilai -. "<<include>>" .-> UC_ValPresensi75
+    UC_InputNilai -. "<<include>>" .-> UC_AuditNilai
+    UC_Transkrip -. "<<include>>" .-> UC_HitungGPA

@@ -1,0 +1,99 @@
+sequenceDiagram
+    autonumber
+    actor MHS as Mahasiswa
+    actor DPA as Dosen Pembimbing Akademik (PA)
+    participant API as KRSRouter (/api/krs)
+    participant MGR as KRSManager
+    participant FIN as BillingArrearsCheck
+    participant CHAIN as ValidationChain (Chain of Responsibility)
+    participant SM as KRSStateMachine
+    participant DB as SQLite/SQLAlchemy DB
+
+    title Skenario 2: Pengisian, Validasi KRS (Prasyarat, SKS, Konflik, Duplikat), Submit & Approval Dosen PA
+
+    %% ==========================================================
+    %% TAHAP A: TAMBAH MATA KULIAH & CHAIN OF RESPONSIBILITY
+    %% ==========================================================
+    MHS->>API: POST /api/krs/add (nim, kode_mk)
+    API->>MGR: add_course(nim, kode_mk)
+    MGR->>FIN: _check_payment_arrears(nim)
+    FIN->>DB: SELECT * FROM billing WHERE nim={nim} AND status='overdue'
+    alt Mahasiswa Memiliki Tunggakan SPP Overdue (Integrasi Minggu 11)
+        DB-->>FIN: Overdue Billing Found
+        FIN-->>MGR: HTTPException(403, "Pengisian KRS diblokir karena tunggakan SPP")
+        MGR-->>API: 403 Forbidden
+        API-->>MHS: HTTP 403 Forbidden (Lunasi tagihan SPP terlebih dahulu)
+    else Bebas Tunggakan SPP
+        MGR->>DB: SELECT KRS (status IN ['DRAFT','REVISION']) & SELECT Matakuliah
+        MGR->>CHAIN: validate(context: {db, nim, krs, new_mk})
+        Note over CHAIN,DB: Step 1: SKSValidator (Cek Total SKS + MK Baru <= 24)
+        CHAIN->>DB: Hitung total_sks saat ini + new_mk.sks
+        alt Total SKS > 24
+            CHAIN-->>MGR: ValidationResult(is_valid=False, "Total SKS melebihi batas maksimal 24 SKS")
+            MGR-->>API: HTTPException(400)
+            API-->>MHS: HTTP 400 Bad Request (Batas 24 SKS terlampaui)
+        else SKS <= 24 -> Lanjut Step 2: PrerequisiteValidator
+            Note over CHAIN,DB: Step 2: Query NOT EXISTS Prasyarat (Nilai Semester Lalu >= C / Bobot >= 2.0)
+            CHAIN->>DB: SELECT prereq WHERE NOT EXISTS (riwayat_nilai bobot >= 2.0 AND semester < current)
+            alt Prasyarat Belum Lulus atau Nilai D/E (< 2.0)
+                DB-->>CHAIN: Unfulfilled Prerequisite List (misal: "Algoritma Dasar")
+                CHAIN-->>MGR: ValidationResult(is_valid=False, "Prasyarat tidak terpenuhi: Algoritma Dasar")
+                MGR-->>API: HTTPException(400)
+                API-->>MHS: HTTP 400 Bad Request (Prasyarat belum terpenuhi)
+            else Prasyarat Terpenuhi -> Lanjut Step 3: ConflictValidator
+                Note over CHAIN,DB: Step 3: Cek Irisan Waktu [start, end) pada JadwalKuliah Aktif
+                CHAIN->>DB: SELECT jadwal_kuliah WHERE matakuliah_id IN krs_details AND status='AKTIF'
+                alt Jadwal Hari & Jam Beririsan (existing_start < new_end AND new_start < existing_end)
+                    CHAIN-->>MGR: ValidationResult(is_valid=False, "Jadwal bentrok dengan mata kuliah lain")
+                    MGR-->>API: HTTPException(400)
+                    API-->>MHS: HTTP 400 Bad Request (Jadwal kuliah bentrok)
+                else Tidak Bentrok -> Lanjut Step 4: DuplicateValidator
+                    Note over CHAIN,DB: Step 4: Cek Double Enrollment di KRS yang Sama
+                    alt Mata Kuliah Sudah Diambil di KRS Ini
+                        CHAIN-->>MGR: ValidationResult(is_valid=False, "Mata kuliah sudah terdaftar di KRS")
+                        MGR-->>API: HTTPException(400)
+                        API-->>MHS: HTTP 400 Bad Request (Double enrollment ditolak)
+                    else Seluruh 4 Validator Lulus
+                        CHAIN-->>MGR: ValidationResult(is_valid=True)
+                        MGR->>DB: INSERT INTO krs_detail & UPDATE krs SET total_sks = total_sks + sks
+                        DB-->>MGR: Commit OK
+                        MGR-->>API: KRSResponse
+                        API-->>MHS: HTTP 200 OK (Mata kuliah berhasil ditambahkan)
+                    end
+                end
+            end
+        end
+    end
+
+    %% ==========================================================
+    %% TAHAP B: SUBMIT KRS & APPROVAL / REVISI DOSEN PA (STATE MACHINE)
+    %% ==========================================================
+    MHS->>API: POST /api/krs/submit/{nim}
+    API->>MGR: submit_krs(nim)
+    alt KRS Masih Kosong (0 Mata Kuliah)
+        MGR-->>API: HTTPException(400, "KRS tidak boleh kosong saat disubmit")
+        API-->>MHS: HTTP 400 Bad Request
+    else KRS Valid & Berisi Mata Kuliah
+        MGR->>SM: can_transition(DRAFT/REVISION -> SUBMITTED)
+        MGR->>DB: UPDATE krs SET status='SUBMITTED', version=version+1 & INSERT krs_transition
+        DB-->>MGR: Commit OK
+        MGR-->>API: KRSResponse (status='SUBMITTED')
+        API-->>MHS: HTTP 200 OK (Menunggu persetujuan Dosen PA)
+    end
+
+    DPA->>API: POST /api/krs/approve/{nim} (dosen_pa_id)
+    API->>MGR: approve_krs(nim, dosen_pa_id)
+    MGR->>DB: Cek kepemilikan mahasiswa.dosen_pa_id == dosen_pa_id
+    alt Mahasiswa Belum Memiliki Dosen PA
+        MGR-->>API: HTTPException(409, "Mahasiswa belum memiliki Dosen PA")
+        API-->>DPA: HTTP 409 Conflict
+    else Dosen Bukan Dosen PA Mahasiswa Tersebut
+        MGR-->>API: HTTPException(403, "Anda bukan Dosen PA mahasiswa ini")
+        API-->>DPA: HTTP 403 Forbidden
+    else Dosen PA Valid & Status SUBMITTED
+        MGR->>SM: can_transition(SUBMITTED -> APPROVED)
+        MGR->>DB: UPDATE krs SET status='APPROVED', version=version+1 & INSERT krs_transition
+        DB-->>MGR: Commit Atomic Transaction
+        MGR-->>API: KRSResponse (status='APPROVED')
+        API-->>DPA: HTTP 200 OK (KRS Disetujui)
+    end

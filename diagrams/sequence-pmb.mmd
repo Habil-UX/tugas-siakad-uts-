@@ -1,0 +1,67 @@
+sequenceDiagram
+    autonumber
+    actor CM as Calon Mahasiswa
+    actor ADM as Admin Akademik
+    participant API as PMBRouter (/api/pmb)
+    participant SVC as PMBService
+    participant VAL as PydanticValidator (CalonMahasiswaCreate)
+    participant DB as SQLite/SQLAlchemy DB (calon_mahasiswa, nim_sequences)
+
+    title Skenario 1: Proses Pendaftaran Mahasiswa Baru (PMB) & Persetujuan Generate NIM Thread-Safe
+
+    %% ==========================================================
+    %% TAHAP A: REGISTRASI CALON MAHASISWA
+    %% ==========================================================
+    CM->>API: POST /api/pmb/register (nama, email, phone, tgl_lahir, prodi_id, jalur_id)
+    API->>VAL: Validasi EmailStr & Regex Nomor Telepon Indonesia (^(\+62|62|0)8...)
+    alt Format Telepon atau Email Tidak Valid
+        VAL-->>API: RequestValidationError
+        API-->>CM: HTTP 400 Bad Request (Format nomor telepon/email tidak valid)
+    else Input Valid
+        VAL-->>API: Validated Payload
+        API->>SVC: register_calon_mahasiswa(db, payload)
+        SVC->>DB: SELECT program_studi, jalur_masuk, & cek email existing
+        alt Program Studi atau Jalur Masuk Tidak Ditemukan
+            DB-->>SVC: None
+            SVC-->>API: HTTPException(404, "Program Studi/Jalur Masuk tidak ditemukan")
+            API-->>CM: HTTP 404 Not Found
+        else Email Sudah Terdaftar (Duplicate Registration)
+            DB-->>SVC: Existing CalonMahasiswa
+            SVC-->>API: HTTPException(409, "Email sudah terdaftar")
+            API-->>CM: HTTP 409 Conflict (Email ganda ditolak)
+        else Data Valid & Unik
+            SVC->>DB: INSERT INTO calon_mahasiswa (status='pending', nim=NULL)
+            DB-->>SVC: Commit OK (id=1, status='pending')
+            SVC-->>API: CalonMahasiswaResponse
+            API-->>CM: HTTP 201 Created (status: "pending")
+        end
+    end
+
+    %% ==========================================================
+    %% TAHAP B: APPROVAL PENDAFTARAN & GENERATE NIM THREAD-SAFE
+    %% ==========================================================
+    ADM->>API: PUT /api/pmb/approve/{id}?dosen_pa_id=1
+    API->>SVC: approve_calon_mahasiswa(db, calon_id, dosen_pa_id)
+    SVC->>DB: BEGIN IMMEDIATE (Acquire Write Lock & PRAGMA busy_timeout=30000)
+    SVC->>DB: SELECT * FROM calon_mahasiswa WHERE id = {id} FOR UPDATE
+    alt Calon Mahasiswa Tidak Ditemukan
+        DB-->>SVC: None
+        SVC-->>API: HTTPException(404, "Calon mahasiswa tidak ditemukan")
+        API-->>ADM: HTTP 404 Not Found
+    else Status Sudah REJECTED
+        DB-->>SVC: status == 'rejected'
+        SVC-->>API: HTTPException(400, "Pendaftar berstatus rejected tidak dapat di-approve")
+        API-->>ADM: HTTP 400 Bad Request
+    else Status Sudah APPROVED (Idempotent Request)
+        DB-->>SVC: status == 'approved', nim == '2026TIF-0001'
+        SVC-->>API: Return NIM Existing ('2026TIF-0001') Tanpa Generate Ulang
+        API-->>ADM: HTTP 200 OK (Idempotent: nim='2026TIF-0001')
+    else Status PENDING (Proses Generate NIM Baru)
+        SVC->>DB: SELECT * FROM nim_sequences WHERE tahun=2026 AND prodi_id=1 FOR UPDATE
+        DB-->>SVC: last_sequence = 0
+        SVC->>DB: UPDATE nim_sequences SET last_sequence = 1
+        SVC->>DB: UPDATE calon_mahasiswa SET status='approved', nim='2026TIF-0001', approved_at=NOW()
+        DB-->>SVC: COMMIT Transaction
+        SVC-->>API: CalonMahasiswaResponse (status='approved', nim='2026TIF-0001')
+        API-->>ADM: HTTP 200 OK (NIM Baru: 2026TIF-0001)
+    end
