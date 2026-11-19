@@ -1,0 +1,16 @@
+sequenceDiagram
+    actor Admin
+    participant API as Rescheduling API
+    participant RS as ReschedulingService
+    participant CSP as Constraint Checker
+    participant DB as Database
+
+    Admin->>API: POST /api/schedules/{id}/suggestions
+    API->>RS: suggest_alternatives(jadwal_id)
+    RS->>DB: get_available_slots()
+    DB-->>RS: list of slots
+    RS->>CSP: validate_slots(slots)
+    CSP-->>RS: valid_slots (max 3)
+    RS-->>API: JSON Rekomendasi
+    API-->>Admin: Tampilkan di Dashboard
+    Note over Admin: Admin mengonfirmasi secara manual

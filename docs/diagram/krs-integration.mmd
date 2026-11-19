@@ -1,0 +1,12 @@
+sequenceDiagram
+    participant SS as SchedulingService
+    participant KIS as KRSInvalidationService
+    participant DB as Database
+    participant SO as StudentObserver
+
+    SS->>KIS: invalidate_affected_krs(schedule_id, old, new)
+    KIS->>DB: SELECT krs JOIN krs_detail WHERE matakuliah_id = schedule.matakuliah_id
+    DB-->>KIS: affected_krs_list
+    KIS->>DB: UPDATE krs SET needs_review = True
+    KIS->>SO: notify(mahasiswa_terdampak)
+    SO-->>KIS: notification_sent

@@ -1,0 +1,21 @@
+sequenceDiagram
+    actor Admin
+    participant SS as SchedulingService
+    participant CD as ConflictDetector
+    participant DB as Database
+    participant Sub as ScheduleSubject
+    participant NM as NotificationManager
+    participant SO as StudentObserver
+    participant LO as LecturerObserver
+
+    Admin->>SS: POST /api/schedules (Create/Update)
+    SS->>CD: check_conflict(jadwal)
+    CD-->>SS: return (no conflict)
+    SS->>DB: COMMIT TRANSACTION
+    SS->>Sub: notify("SCHEDULE_CHANGED")
+    Sub->>LO: update(data)
+    Sub->>SO: update(data)
+    LO->>NM: send_notification(dosen)
+    SO->>NM: send_notification(mahasiswa)
+    NM-->>DB: INSERT notification_log
+    SS-->>Admin: HTTP 200 OK
