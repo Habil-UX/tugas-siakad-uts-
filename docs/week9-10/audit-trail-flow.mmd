@@ -1,0 +1,12 @@
+
+flowchart TD
+    A["Dosen mengirim perubahan nilai"] --> B["GradeService menerima permintaan"]
+    B --> C["Validasi nilai dan mahasiswa"]
+    C --> D["Simpan changed_by dan reason"]
+    D --> E["UPDATE riwayat_nilai"]
+    E --> F["Database Trigger dijalankan"]
+    F --> G["INSERT grade_history"]
+    G --> H["Hapus grade_audit_context"]
+    H --> I["COMMIT transaksi"]
+    I --> J["Riwayat tersedia melalui v_grade_history"]
+    J --> K["API menampilkan riwayat perubahan"]
