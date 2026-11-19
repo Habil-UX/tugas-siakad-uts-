@@ -1,0 +1,28 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Testing & Coverage Cache
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Environment Secrets
+.env
+
+# Database Backup & Temporary Journal Files
+archive_database_backup/
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Duplicate Full Packaging Folder (Weekly & UTS packages are in PENGUMPULAN_SIAKAD/ and UTS_UML_SUBMISSION/)
+FINAL_SUBMISSION/
+FINAL_SUBMISSION_SIAKAD.zip

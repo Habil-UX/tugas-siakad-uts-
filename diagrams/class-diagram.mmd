@@ -1,0 +1,372 @@
+classDiagram
+    direction TB
+
+    %% ==========================================================
+    %% 1. HIERARKI USER (INHERITANCE)
+    %% ==========================================================
+    class User {
+        <<abstract>>
+        #int id
+        #String username
+        #String password_hash
+        #String role
+        #bool is_active
+        #DateTime created_at
+        +login(username: String, password: String) String
+        +verifyToken(token: String) Dict
+        +hasRole(requiredRole: String) bool
+    }
+
+    class CalonMahasiswa {
+        +int id
+        +String nama_lengkap
+        +String email
+        +String phone
+        +Date tanggal_lahir
+        +String alamat
+        +int program_studi_id
+        +int jalur_masuk_id
+        +StatusPendaftaran status
+        +register() CalonMahasiswa
+        +validatePhoneFormat() bool
+    }
+
+    class Mahasiswa {
+        +String nim
+        +int dosen_pa_id
+        +DateTime approved_at
+        +isiKRS(semester: int, kode_mk: String) KRS
+        +submitKRS(semester: int) KRS
+        +lihatTranskrip() Dict
+        +unduhTranskripPDF() Bytes
+        +scanPresensiQR(token: String) AttendanceRecord
+        +bayarSPP(billing_id: int, amount: Decimal) Payment
+    }
+
+    class Dosen {
+        +int id
+        +String nidn
+        +String nama
+        +approveKRS(nim: String, dosen_pa_id: int) KRS
+        +reviseKRS(nim: String, notes: String) KRS
+        +inputNilai(nim: String, mk_id: int, huruf: String, presensi: float) Grade
+        +updateNilai(grade_id: int, huruf_baru: String, reason: String) Grade
+        +generateAttendanceQR(schedule_id: int, valid_minutes: int) AttendanceQRToken
+    }
+
+    class Admin {
+        +String admin_level
+        +approvePMB(calon_id: int, dosen_pa_id: int) Mahasiswa
+        +rejectPMB(calon_id: int) CalonMahasiswa
+        +kelolaJadwal(data: Dict) Schedule
+        +generateSemesterBilling(semester: int, tahun: String) List~Billing~
+    }
+
+    User <|-- CalonMahasiswa : inherits
+    CalonMahasiswa <|-- Mahasiswa : promoted on approval
+    User <|-- Dosen : inherits
+    User <|-- Admin : inherits
+
+    %% ==========================================================
+    %% 2. ENTITAS MASTER & PMB (AGGREGATION & COMPOSITION)
+    %% ==========================================================
+    class ProgramStudi {
+        +int id
+        +String kode
+        +String nama
+        +String fakultas
+        +Decimal tarif_spp
+        +getTarifSPP() Decimal
+    }
+
+    class JalurMasuk {
+        +int id
+        +String kode
+        +String nama
+    }
+
+    class NimSequence {
+        +int id
+        +int tahun
+        +int program_studi_id
+        +int last_sequence
+        +nextSequence() int
+    }
+
+    class PMBService {
+        -Session db
+        +registerCalonMahasiswa(payload: CalonMahasiswaCreate) CalonMahasiswa
+        +approveCalonMahasiswa(calon_id: int, dosen_pa_id: int) CalonMahasiswa
+        +rejectCalonMahasiswa(calon_id: int) CalonMahasiswa
+        +generateNim(tahun: int, kode_prodi: String) String
+        +getStatsGroupBy() Dict
+    }
+
+    ProgramStudi "1" o-- "0..*" CalonMahasiswa : aggregation
+    JalurMasuk "1" o-- "0..*" CalonMahasiswa : aggregation
+    ProgramStudi "1" *-- "0..*" NimSequence : composition
+    Dosen "1" o-- "0..*" Mahasiswa : membimbing (Dosen PA)
+    PMBService ..> CalonMahasiswa : manages
+    PMBService ..> NimSequence : locks & increments
+
+    %% ==========================================================
+    %% 3. CLASS INTI: COURSE, ENROLLMENT (KRS), & VALIDATOR CHAIN
+    %% ==========================================================
+    class Course {
+        +int id
+        +String kode_mk
+        +String nama_mk
+        +int sks
+        +int semester
+        +String jenis_mk
+        +String hari
+        +Time jam_mulai
+        +Time jam_selesai
+        +validateSksPositive() bool
+    }
+
+    class CoursePrerequisite {
+        +int id
+        +int matakuliah_id
+        +int prerequisite_id
+    }
+
+    class Enrollment {
+        +int id
+        +String nim
+        +int semester_akademik
+        +String tahun_akademik
+        +int total_sks
+        +KRSStatus status
+        +bool needs_review
+        +int version
+        +transitionTo(target: KRSStatus) void
+    }
+
+    class EnrollmentItem {
+        +int id
+        +int krs_id
+        +int matakuliah_id
+        +DateTime created_at
+    }
+
+    class KrsTransition {
+        +int id
+        +int krs_id
+        +String from_status
+        +String to_status
+        +String changed_by
+        +DateTime created_at
+    }
+
+    class Validator {
+        <<abstract>>
+        #Validator next_validator
+        #bool stop_on_first_error
+        +setNext(validator: Validator) Validator
+        +validate(context: Dict) ValidationResult
+        #check(context: Dict)* ValidationResult
+    }
+
+    class SKSValidator {
+        +int MAX_SKS = 24
+        #check(context: Dict) ValidationResult
+    }
+
+    class PrerequisiteValidator {
+        +float MIN_PREREQ_BOBOT = 2.0
+        #check(context: Dict) ValidationResult
+        +explainPrerequisiteQuery(nim: String, mk_id: int) List
+    }
+
+    class ConflictValidator {
+        #check(context: Dict) ValidationResult
+        -_getCourseSchedules(db: Session, mk: Course) List
+    }
+
+    class DuplicateValidator {
+        #check(context: Dict) ValidationResult
+    }
+
+    class KRSManager {
+        -Session db
+        -Validator validator_chain
+        +addCourse(nim: String, kode_mk: String) Enrollment
+        +removeCourse(nim: String, kode_mk: String) Enrollment
+        +validateKrs(nim: String) ValidationResult
+        +submitKrs(nim: String) Enrollment
+        +approveKrs(nim: String, dosen_pa_id: int) Enrollment
+        +reviseKrs(nim: String, dosen_pa_id: int, notes: String) Enrollment
+        -_checkPaymentArrears(nim: String) void
+    }
+
+    Course "1" *-- "0..*" CoursePrerequisite : composition
+    Mahasiswa "1" --> "0..*" Enrollment : owns
+    Enrollment "1" *-- "1..*" EnrollmentItem : composition
+    Enrollment "1" *-- "0..*" KrsTransition : composition
+    Course "1" o-- "0..*" EnrollmentItem : referenced in
+    Validator <|-- SKSValidator : inherits
+    Validator <|-- PrerequisiteValidator : inherits
+    Validator <|-- ConflictValidator : inherits
+    Validator <|-- DuplicateValidator : inherits
+    KRSManager *-- Validator : delegates validation
+
+    %% ==========================================================
+    %% 4. CLASS INTI: SCHEDULE, ROOM & OBSERVER PATTERN
+    %% ==========================================================
+    class Ruangan {
+        +int id
+        +String kode_ruangan
+        +String nama_ruangan
+        +int kapasitas
+        +bool is_active
+    }
+
+    class Schedule {
+        +int id
+        +int matakuliah_id
+        +int dosen_id
+        +int ruangan_id
+        +String hari
+        +Time jam_mulai
+        +Time jam_selesai
+        +String tahun_akademik
+        +int semester_akademik
+        +String status
+    }
+
+    class ScheduleSubject {
+        -List~ScheduleObserver~ observers
+        +attach(observer: ScheduleObserver) void
+        +detach(observer: ScheduleObserver) void
+        +notify(db: Session, event_type: String, data: Dict) void
+    }
+
+    class ScheduleObserver {
+        <<interface>>
+        +update(db: Session, event_type: String, data: Dict)* void
+    }
+
+    class StudentObserver {
+        +update(db: Session, event_type: String, data: Dict) void
+    }
+
+    class LecturerObserver {
+        +update(db: Session, event_type: String, data: Dict) void
+    }
+
+    class AdminObserver {
+        +update(db: Session, event_type: String, data: Dict) void
+    }
+
+    Course "1" o-- "0..*" Schedule : scheduled in
+    Dosen "1" o-- "0..*" Schedule : teaches
+    Ruangan "1" o-- "0..*" Schedule : hosts
+    ScheduleSubject o-- ScheduleObserver : notifies
+    ScheduleObserver <|.. StudentObserver : implements
+    ScheduleObserver <|.. LecturerObserver : implements
+    ScheduleObserver <|.. AdminObserver : implements
+
+    %% ==========================================================
+    %% 5. CLASS INTI: GRADE, TRANSCRIPT & AUDIT TRAIL
+    %% ==========================================================
+    class SkalaNilai {
+        +int id
+        +String nilai_huruf
+        +float bobot
+    }
+
+    class Grade {
+        +int id
+        +String nim
+        +int matakuliah_id
+        +int skala_nilai_id
+        +int semester
+        +float presensi_persen
+        +String created_by
+        +int version
+    }
+
+    class GradeHistory {
+        +int id
+        +int riwayat_nilai_id
+        +String old_value
+        +String new_value
+        +String changed_by
+        +DateTime changed_at
+        +String reason
+    }
+
+    class GPACalculator {
+        -Session db
+        +float MINIMUM_LULUS = 1.0
+        +calculateIps(nim: String, semester: int) float
+        +calculateIpk(nim: String) Dict
+        +getTranscript(nim: String) Dict
+    }
+
+    Mahasiswa "1" --> "0..*" Grade : earns
+    Course "1" o-- "0..*" Grade : evaluated in
+    SkalaNilai "1" o-- "0..*" Grade : defines weight
+    Grade "1" *-- "0..*" GradeHistory : audit trail composition
+    GPACalculator ..> Grade : computes IPS & IPK
+
+    %% ==========================================================
+    %% 6. CLASS INTI: BILLING, PAYMENT & ATTENDANCE QR (MINGGU 11-12)
+    %% ==========================================================
+    class Billing {
+        +int id
+        +String nim
+        +int semester
+        +String tahun_ajaran
+        +Decimal total_amount
+        +Decimal paid_amount
+        +Date due_date
+        +String status
+        +int late_fee
+    }
+
+    class Payment {
+        +int id
+        +int billing_id
+        +int payment_method_id
+        +Decimal amount
+        +String status
+        +String reference_number
+        +DateTime paid_at
+    }
+
+    class AttendanceSession {
+        +int id
+        +int schedule_id
+        +Date session_date
+        +String session_status
+        +DateTime created_at
+    }
+
+    class AttendanceQRToken {
+        +int id
+        +int session_id
+        +String jti
+        +String phase
+        +DateTime generated_at
+        +DateTime expires_at
+        +DateTime revoked_at
+    }
+
+    class AttendanceRecord {
+        +int id
+        +int session_id
+        +int student_id
+        +String nim
+        +DateTime scanned_at
+        +String attendance_status
+        +int qr_token_id
+    }
+
+    Mahasiswa "1" *-- "0..*" Billing : billed for
+    Billing "1" *-- "0..*" Payment : paid via
+    Schedule "1" *-- "0..*" AttendanceSession : opens
+    AttendanceSession "1" *-- "1..*" AttendanceQRToken : issues
+    AttendanceSession "1" *-- "0..*" AttendanceRecord : records
+    Mahasiswa "1" --> "0..*" AttendanceRecord : attends
