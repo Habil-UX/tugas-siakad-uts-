@@ -3,6 +3,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from app.database import get_db
 from app.main import app
 from app.models import (
     CalonMahasiswa,
@@ -32,8 +33,6 @@ from app.services.krs_invalidator import KRSInvalidator
 from app.services.krs_state_machine import Actor, KRSStateMachine, KRSStatus
 from app.services.rescheduling_service import PROMPT_STEP_3, ReschedulingService, saring_saran
 from app.utils.ics_exporter import export_student_ics, generate_ics_from_schedules
-
-client = TestClient(app)
 
 # =====================================================================
 # 1. TEST 42 KOMBINASI TRANSISI ILEGAL + 6 TRANSISI LEGAL (Actor.SISTEM)
@@ -247,6 +246,10 @@ def test_saring_saran_and_ics_export(db_session):
     assert "BEGIN:VEVENT" in ics_text
     assert "IF802 - Desain Pola OOP" in ics_text
 
-    resp = client.get("/api/schedules/export.ics")
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        resp = TestClient(app).get("/api/schedules/export.ics")
+    finally:
+        app.dependency_overrides.clear()
     assert resp.status_code == 200
     assert "BEGIN:VCALENDAR" in resp.text

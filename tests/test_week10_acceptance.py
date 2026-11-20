@@ -1,6 +1,7 @@
 from datetime import date, time
 from fastapi.testclient import TestClient
 
+from app.database import get_db
 from app.main import app
 from app.models import (
     CalonMahasiswa,
@@ -18,8 +19,6 @@ from app.models import (
 from app.services.grade_service import GradeService
 from app.services.transcript_service import TranscriptService
 from app.utils.pdf_generator import generate_transcript_pdf, render_transcript_html
-
-client = TestClient(app)
 
 
 def _seed_scales(db):
@@ -206,11 +205,16 @@ def test_week10_multi_semester_acceptance_transcript_html_and_pdf(db_session):
     assert "Algoritma &amp; Struktur Data" in html_str
 
     # Verifikasi endpoint HTML & PDF
-    resp_html = client.get(f"/api/grades/transcript/{mhs.nim}/html")
-    assert resp_html.status_code == 200
-    assert "Predikat Kelulusan: Cum Laude" in resp_html.text
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        c = TestClient(app)
+        resp_html = c.get(f"/api/grades/transcript/{mhs.nim}/html")
+        assert resp_html.status_code == 200
+        assert "Predikat Kelulusan: Cum Laude" in resp_html.text
 
-    resp_pdf = client.get(f"/api/grades/transcript/{mhs.nim}/pdf")
-    assert resp_pdf.status_code == 200
-    assert resp_pdf.headers["content-type"] == "application/pdf"
-    assert resp_pdf.content.startswith(b"%PDF")
+        resp_pdf = c.get(f"/api/grades/transcript/{mhs.nim}/pdf")
+        assert resp_pdf.status_code == 200
+        assert resp_pdf.headers["content-type"] == "application/pdf"
+        assert resp_pdf.content.startswith(b"%PDF")
+    finally:
+        app.dependency_overrides.clear()

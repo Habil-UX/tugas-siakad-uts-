@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from hypothesis import given, settings, strategies as st
 
+from app.database import get_db
 from app.main import app
 from app.models import (
     CalonMahasiswa,
@@ -24,8 +25,6 @@ from app.services.grade_service import GradeService
 from app.services.nilai_repo import NilaiRepo
 from app.services.presensi_port import PresensiStub, is_pengampu
 from app.utils.security import create_access_token
-
-client = TestClient(app)
 
 
 def _seed_scales(db):
@@ -144,16 +143,20 @@ def test_week9_presensi_port_is_pengampu_and_put_kelas_nilai(db_session):
 
     # Revisi nilai melalui endpoint PUT /api/kelas/{id}/nilai/{nim} -> mencatat grade_history di transaksi yang sama
     token = create_access_token({"sub": "dosen_pengampu", "role": "dosen"})
-    resp = client.put(
-        f"/api/kelas/{kelas.id}/nilai/{mhs.nim}",
-        json={
-            "nilai_huruf": "A",
-            "dosen_id": dosen_pengampu.id,
-            "changed_by": "dosen_pengampu",
-            "reason": "Koreksi nilai proyek akhir",
-        },
-        headers={"Authorization": f"Bearer {token}"},
-    )
+    app.dependency_overrides[get_db] = lambda: db_session
+    try:
+        resp = TestClient(app).put(
+            f"/api/kelas/{kelas.id}/nilai/{mhs.nim}",
+            json={
+                "nilai_huruf": "A",
+                "dosen_id": dosen_pengampu.id,
+                "changed_by": "dosen_pengampu",
+                "reason": "Koreksi nilai proyek akhir",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    finally:
+        app.dependency_overrides.clear()
     assert resp.status_code == 200
     assert resp.json()["new_value"] == "A"
     db_session.refresh(kd)
