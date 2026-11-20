@@ -141,8 +141,30 @@ def upgrade() -> None:
         ["krs_id"]
     )
 
+    # 5. Minggu 9: skala_nilai.lulus & krs_detail.nilai (FK skala_nilai.nilai_huruf)
+    op.add_column(
+        "skala_nilai",
+        sa.Column("lulus", sa.Boolean(), nullable=False, server_default=sa.text("1"))
+    )
+    op.execute("UPDATE skala_nilai SET lulus = CASE WHEN bobot >= 1.0 THEN 1 ELSE 0 END")
+
+    with op.batch_alter_table("krs_detail") as batch_op:
+        batch_op.add_column(sa.Column("nilai", sa.String(2), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_krs_detail_nilai_skala_nilai",
+            "skala_nilai",
+            ["nilai"],
+            ["nilai_huruf"]
+        )
+
 
 def downgrade() -> None:
+    with op.batch_alter_table("krs_detail") as batch_op:
+        batch_op.drop_constraint("fk_krs_detail_nilai_skala_nilai", type_="foreignkey")
+        batch_op.drop_column("nilai")
+
+    with op.batch_alter_table("skala_nilai") as batch_op:
+        batch_op.drop_column("lulus")
 
     # Hapus tabel transition dan history
     op.drop_index(

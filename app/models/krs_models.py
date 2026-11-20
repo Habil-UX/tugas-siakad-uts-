@@ -67,6 +67,11 @@ class KRSDetail(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     krs_id: Mapped[int] = mapped_column(ForeignKey("krs.id"), index=True, nullable=False)
     matakuliah_id: Mapped[int] = mapped_column(ForeignKey("matakuliah.id"), index=True, nullable=False)
+    nilai: Mapped[Optional[str]] = mapped_column(
+        String(2),
+        ForeignKey("skala_nilai.nilai_huruf"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     # Relationships
@@ -98,6 +103,17 @@ class SkalaNilai(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     nilai_huruf: Mapped[str] = mapped_column(String(2), unique=True, nullable=False)
     bobot: Mapped[float] = mapped_column(nullable=False)
+    lulus: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    def __init__(self, **kwargs):
+        if "lulus" not in kwargs:
+            if "bobot" in kwargs and kwargs["bobot"] is not None:
+                kwargs["lulus"] = float(kwargs["bobot"]) >= 1.0
+            elif kwargs.get("nilai_huruf") == "E":
+                kwargs["lulus"] = False
+            else:
+                kwargs["lulus"] = True
+        super().__init__(**kwargs)
 
 
 

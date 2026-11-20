@@ -1,3 +1,4 @@
+from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -5,17 +6,19 @@ from app.models import (
     RiwayatNilai,
     SkalaNilai,
 )
+from app.services.nilai_repo import NilaiRepo
 
 
 class GPACalculator:
 
     # Skala nilai proyek: A=4.0, B=3.0, C=2.0, D=1.0, E=0.0.
-    # Nilai minimal kelulusan mata kuliah adalah D (bobot >= 1.0),
+    # Nilai minimal kelulusan mata kuliah adalah D (bobot >= 1.0 / skala_nilai.lulus == True),
     # sedangkan syarat kelulusan prasyarat KRS adalah minimal C (bobot >= 2.0).
     MINIMUM_LULUS = 1.0
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, repo: NilaiRepo | None = None):
         self.db = db
+        self.repo = repo or NilaiRepo(db)
 
     def _get_grades(self, nim: str, semester=None):
         query = (
@@ -45,14 +48,27 @@ class GPACalculator:
             RiwayatNilai.id,
         ).all()
 
+    @classmethod
+    def _is_lulus(cls, scale_or_dict) -> bool:
+        if isinstance(scale_or_dict, dict):
+            if "lulus" in scale_or_dict and scale_or_dict["lulus"] is not None:
+                return bool(scale_or_dict["lulus"])
+            return float(scale_or_dict.get("bobot", 0.0)) >= cls.MINIMUM_LULUS
+        lulus_attr = getattr(scale_or_dict, "lulus", None)
+        bobot_val = float(getattr(scale_or_dict, "bobot", 0.0))
+        if lulus_attr is not None:
+            return bool(lulus_attr) and bobot_val >= cls.MINIMUM_LULUS
+        return bobot_val >= cls.MINIMUM_LULUS
+
     def _get_best_courses(self, records):
         """
-        Mengambil nilai tertinggi untuk setiap mata kuliah apabila mata kuliah diulang.
+        Mengambil nilai terbaik per kode_mk apabila mata kuliah diulang (terbaik per kode_mk).
         """
         best_courses = {}
 
         for grade, scale, mk in records:
-            current = best_courses.get(mk.id)
+            key = getattr(mk, "kode_mk", None) or mk.id
+            current = best_courses.get(key)
 
             candidate = {
                 "grade_id": grade.id,
@@ -61,11 +77,12 @@ class GPACalculator:
                 "sks": mk.sks,
                 "nilai_huruf": scale.nilai_huruf,
                 "bobot": scale.bobot,
+                "lulus": self._is_lulus(scale),
                 "semester": grade.semester,
             }
 
             if current is None:
-                best_courses[mk.id] = candidate
+                best_courses[key] = candidate
             elif (
                 scale.bobot,
                 grade.semester,
@@ -75,7 +92,7 @@ class GPACalculator:
                 current["semester"],
                 current["grade_id"],
             ):
-                best_courses[mk.id] = candidate
+                best_courses[key] = candidate
 
         return list(best_courses.values())
 
@@ -87,7 +104,7 @@ class GPACalculator:
         passed_courses = [
             course
             for course in courses
-            if course["bobot"] >= self.MINIMUM_LULUS
+            if self._is_lulus(course)
         ]
 
         total_sks_lulus = sum(
@@ -97,21 +114,29 @@ class GPACalculator:
 
         active_courses = passed_courses if only_passed else courses
         active_sks = sum(c["sks"] for c in active_courses)
-        total_mutu = sum(
-            course["sks"] * course["bobot"]
-            for course in active_courses
+
+        # Decimal & ROUND_HALF_UP sekali di akhir perhitungan
+        total_mutu_dec = sum(
+            (Decimal(str(course["sks"])) * Decimal(str(course["bobot"])) for course in active_courses),
+            Decimal("0"),
         )
 
-        ip = (
-            round(total_mutu / active_sks, 2)
-            if active_sks > 0
-            else 0.0
+        if active_sks > 0:
+            ip_dec = (total_mutu_dec / Decimal(str(active_sks))).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            ip = float(ip_dec)
+        else:
+            ip = 0.0
+
+        total_mutu = float(
+            total_mutu_dec.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         )
 
         return {
             "total_sks": total_sks,
             "total_sks_lulus": total_sks_lulus,
-            "total_mutu": round(total_mutu, 2),
+            "total_mutu": total_mutu,
             "ip": ip,
         }
 
@@ -129,12 +154,16 @@ class GPACalculator:
             "total_mutu": result["total_mutu"],
         }
 
+    def hitung_ips(self, nim: str, semester: int):
+        return self.calculate_ips(nim, semester)
+
     def calculate_ipk(self, nim: str):
         """
         Rumus: IPK = Σ(SKS × Nilai Angka) / Σ(SKS)
         Aturan:
-        - Hanya mata kuliah lulus yang dihitung (nilai minimal D / bobot >= 2.0).
-        - Jika mata kuliah diulang, gunakan nilai tertinggi.
+        - Hanya mata kuliah lulus yang dihitung (skala_nilai.lulus == True / nilai minimal D).
+        - Jika mata kuliah diulang, gunakan nilai terbaik per kode_mk.
+        - Menggunakan Decimal dengan pembulatan ROUND_HALF_UP sekali di akhir.
         - Jika belum memiliki nilai (atau belum ada MK lulus), kembalikan 0.0.
         """
         records = self._get_grades(nim)
@@ -150,13 +179,18 @@ class GPACalculator:
             "jumlah_mata_kuliah": len(courses),
         }
 
+    def hitung_ipk(self, nim: str):
+        return self.calculate_ipk(nim)
+
     def get_transcript(self, nim: str):
         records = self._get_grades(nim)
 
         transcript = []
 
         for grade, scale, mk in records:
-            mutu = round(mk.sks * scale.bobot, 2)
+            mutu_dec = (Decimal(str(mk.sks)) * Decimal(str(scale.bobot))).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
             transcript.append({
                 "semester": grade.semester,
                 "kode_mk": mk.kode_mk,
@@ -164,10 +198,10 @@ class GPACalculator:
                 "sks": mk.sks,
                 "nilai_huruf": scale.nilai_huruf,
                 "bobot": scale.bobot,
-                "mutu": mutu,
+                "mutu": float(mutu_dec),
                 "status": (
                     "LULUS"
-                    if scale.bobot >= self.MINIMUM_LULUS
+                    if self._is_lulus(scale)
                     else "TIDAK LULUS"
                 ),
             })

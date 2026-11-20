@@ -1,21 +1,57 @@
 from io import BytesIO
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Path
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Body, Depends, Path
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.grade import GradeCreate, GradeUpdate
 from app.services.grade_service import GradeService
 from app.services.transcript_service import TranscriptService
-from app.utils.pdf_generator import generate_transcript_pdf
+from app.utils.pdf_generator import generate_transcript_pdf, render_transcript_html
 from app.utils.security import require_roles
 
 router = APIRouter(
     prefix="/api/grades",
     tags=["Grade Management"],
 )
+
+kelas_router = APIRouter(
+    prefix="/api/kelas",
+    tags=["Grade Management - Kelas"],
+)
+
+
+@kelas_router.put("/{id}/nilai/{nim}")
+def put_nilai_kelas(
+    id: int = Path(ge=1),
+    nim: str = ...,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    user: Optional[dict] = Depends(require_roles(["dosen", "admin"])),
+):
+    service = GradeService(db)
+    nilai_huruf = payload.get("nilai_huruf") or payload.get("nilai")
+    changed_by = (
+        payload.get("changed_by")
+        or (user.get("username") if isinstance(user, dict) else None)
+        or "DOSEN"
+    )
+    reason = payload.get("reason", "Input/Update nilai kelas")
+    dosen_id = payload.get("dosen_id")
+    presensi_persen = payload.get("presensi_persen")
+    semester = payload.get("semester")
+    return service.set_nilai_kelas(
+        kelas_id=id,
+        nim=nim,
+        nilai_huruf=nilai_huruf,
+        dosen_id=dosen_id,
+        changed_by=changed_by,
+        reason=reason,
+        presensi_persen=presensi_persen,
+        semester=semester,
+    )
 
 
 @router.post("/input")
@@ -89,6 +125,16 @@ def get_transcript(
 ):
     service = TranscriptService(db)
     return service.get_transcript(nim)
+
+
+@router.get("/transcript/{nim}/html", response_class=HTMLResponse)
+def view_transcript_html(
+    nim: str,
+    db: Session = Depends(get_db),
+):
+    service = TranscriptService(db)
+    transcript = service.get_transcript(nim)
+    return HTMLResponse(content=render_transcript_html(transcript))
 
 
 @router.get("/transcript/{nim}/pdf")

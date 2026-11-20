@@ -52,6 +52,7 @@ async def validation_exception_handler(
 
 app.include_router(auth.router)
 app.include_router(grades.router)
+app.include_router(grades.kelas_router)
 app.include_router(pmb.router)
 app.include_router(krs.router)
 app.include_router(schedules.router)

@@ -1,6 +1,70 @@
 from datetime import datetime
 from io import BytesIO
+import os
 from xml.sax.saxutils import escape
+
+
+def render_transcript_html(data: dict) -> str:
+    """
+    Merender template HTML Transkrip Akademik (app/templates/transcript.html)
+    lengkap dengan tampilan historis per semester dan predikat kelulusan di footer.
+    """
+    tpl_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "templates",
+        "transcript.html",
+    )
+    if os.path.exists(tpl_path):
+        with open(tpl_path, "r", encoding="utf-8") as f:
+            html = f.read()
+    else:
+        html = "<html><body><h1>TRANSKRIP AKADEMIK</h1>{ROWS_HTML}<footer>Predikat Kelulusan: {{ predikat }}</footer></body></html>"
+
+    records = sorted(
+        data.get("records", []),
+        key=lambda item: (item.get("semester", 1), item.get("kode_mk", "")),
+    )
+    rows = []
+    for item in records:
+        sks_val = float(item.get("sks", 0))
+        bobot_val = float(item.get("bobot", 0))
+        mutu_val = float(item.get("mutu", sks_val * bobot_val))
+        rows.append(
+            f"<tr>"
+            f"<td>{escape(str(item.get('semester', '-')))}</td>"
+            f"<td>{escape(str(item.get('kode_mk', '-')))}</td>"
+            f"<td>{escape(str(item.get('nama_mk', '-')))}</td>"
+            f"<td>{escape(str(item.get('sks', '-')))}</td>"
+            f"<td>{escape(str(item.get('nilai_huruf', '-')))}</td>"
+            f"<td>{bobot_val:.2f}</td>"
+            f"<td>{mutu_val:.2f}</td>"
+            f"<td>{escape(str(item.get('status', 'LULUS')))}</td>"
+            f"</tr>"
+        )
+    if not rows:
+        rows.append("<tr><td colspan='8'>Belum ada data nilai</td></tr>")
+
+    nim_val = str(data.get("nim", "-"))
+    angkatan_val = str(
+        data.get("angkatan")
+        or (nim_val[:4] if len(nim_val) >= 4 and nim_val[:4].isdigit() else "2025")
+    )
+
+    replacements = {
+        "{{ nama }}": escape(str(data.get("nama", "-"))),
+        "{{ nim }}": escape(nim_val),
+        "{{ program_studi }}": escape(str(data.get("program_studi") or "-")),
+        "{{ angkatan }}": escape(angkatan_val),
+        "{{ total_sks_lulus }}": str(data.get("total_sks_lulus", 0)),
+        "{{ total_sks }}": str(data.get("total_sks", 0)),
+        "{{ ipk }}": f"{float(data.get('ipk', 0)):.2f}",
+        "{{ predikat }}": escape(str(data.get("predikat", "-"))),
+        "{{ fakultas }}": escape(str(data.get("fakultas") or "Fakultas Ilmu Komputer")),
+        "{ROWS_HTML}": "\n".join(rows),
+    }
+    for k, v in replacements.items():
+        html = html.replace(k, v)
+    return html
 
 from reportlab.graphics.shapes import Circle, Drawing, String
 from reportlab.lib import colors

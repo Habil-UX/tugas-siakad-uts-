@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Transkrip Akademik Resmi — {{ nim }}</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #1e293b; margin: 24px; }
+    header { text-align: center; border-bottom: 2px solid #263b5e; padding-bottom: 12px; margin-bottom: 16px; }
+    h1 { color: #263b5e; margin: 4px 0; font-size: 20px; }
+    .meta-table, .grade-table, .summary-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 12px; }
+    .meta-table td, .grade-table th, .grade-table td, .summary-table th, .summary-table td {
+      border: 1px solid #94a3b8; padding: 6px 8px;
+    }
+    .grade-table th, .summary-table th { background: #263b5e; color: #ffffff; }
+    footer {
+      border-top: 2px solid #263b5e;
+      padding-top: 12px;
+      margin-top: 20px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+    .footer-predikat { font-weight: bold; color: #263b5e; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>UNIVERSITAS NUSANTARA TEKNOLOGI</div>
+    <h1>TRANSKRIP AKADEMIK</h1>
+    <div>Catatan Akademik Lengkap &amp; Tampilan Historis Multi-Semester</div>
+  </header>
+
+  <table class="meta-table">
+    <tr>
+      <td><strong>Nama Mahasiswa</strong></td>
+      <td>{{ nama }}</td>
+      <td><strong>NIM</strong></td>
+      <td>{{ nim }}</td>
+    </tr>
+    <tr>
+      <td><strong>Program Studi</strong></td>
+      <td>{{ program_studi }}</td>
+      <td><strong>Angkatan</strong></td>
+      <td>{{ angkatan }}</td>
+    </tr>
+  </table>
+
+  <h3>Daftar Nilai Historis Per Semester</h3>
+  <table class="grade-table">
+    <thead>
+      <tr>
+        <th>Semester</th>
+        <th>Kode MK</th>
+        <th>Nama Mata Kuliah</th>
+        <th>SKS</th>
+        <th>Nilai Huruf</th>
+        <th>Bobot</th>
+        <th>Mutu</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {ROWS_HTML}
+    </tbody>
+  </table>
+
+  <footer>
+    <div>
+      <div>Total SKS Lulus: <strong>{{ total_sks_lulus }}</strong> / {{ total_sks }}</div>
+      <div>IPK Kumulatif: <strong>{{ ipk }}</strong></div>
+      <div class="footer-predikat">Predikat Kelulusan: {{ predikat }}</div>
+    </div>
+    <div>
+      <div>{{ fakultas }}</div>
+      <br /><br />
+      <div><strong>Dekan {{ fakultas }}</strong></div>
+    </div>
+  </footer>
+</body>
+</html>
